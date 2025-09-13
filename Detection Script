@@ -1,0 +1,106 @@
+from ultralytics import YOLO
+import cv2
+import numpy as np
+from pathlib import Path
+
+class SafetyDetector:
+    def __init__(self, model_path="models/best_safety_model.pt"):
+        self.model = YOLO(model_path)
+        self.class_names = ['helmet', 'fire', 'spark']
+        self.colors = {
+            'helmet': (0, 255, 0),    # Green
+            'fire': (0, 0, 255),      # Red
+            'spark': (255, 255, 0)     # Yellow
+        }
+    
+    def detect_image(self, image_path, conf_threshold=0.5):
+        """Detect safety objects in an image"""
+        
+        # Run inference
+        results = self.model(image_path, conf=conf_threshold)
+        
+        # Load image
+        img = cv2.imread(str(image_path))
+        
+        # Process results
+        for result in results:
+            boxes = result.boxes
+            if boxes is not None:
+                for box in boxes:
+                    # Get box coordinates
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    conf = box.conf[0].cpu().numpy()
+                    class_id = int(box.cls[0].cpu().numpy())
+                    
+                    # Get class name and color
+                    class_name = self.class_names[class_id]
+                    color = self.colors[class_name]
+                    
+                    # Draw bounding box
+                    cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+                    
+                    # Draw label
+                    label = f"{class_name}: {conf:.2f}"
+                    cv2.putText(img, label, (int(x1), int(y1)-10), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        
+        return img
+    
+    def detect_video(self, video_path, output_path="output_video.mp4"):
+        """Detect safety objects in a video"""
+        
+        cap = cv2.VideoCapture(str(video_path))
+        
+        # Get video properties
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Define codec and create VideoWriter
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # Run detection on frame
+            results = self.model(frame, conf=0.5)
+            
+            # Process results
+            for result in results:
+                boxes = result.boxes
+                if boxes is not None:
+                    for box in boxes:
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = box.conf[0].cpu().numpy()
+                        class_id = int(box.cls[0].cpu().numpy())
+                        
+                        class_name = self.class_names[class_id]
+                        color = self.colors[class_name]
+                        
+                        cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+                        
+                        label = f"{class_name}: {conf:.2f}"
+                        cv2.putText(frame, label, (int(x1), int(y1)-10), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
+            # Write frame
+            out.write(frame)
+        
+        # Release everything
+        cap.release()
+        out.release()
+        cv2.destroyAllWindows()
+        
+        print(f"Video processing completed: {output_path}")
+
+if __name__ == "__main__":
+    detector = SafetyDetector()
+    
+    # Test with an image
+    test_img = detector.detect_image("processed_data/images/val/val_0001.jpg")
+    cv2.imshow("Detection Result", test_img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
