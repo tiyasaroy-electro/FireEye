@@ -1,0 +1,74 @@
+import streamlit as st
+import cv2
+import numpy as np
+from PIL import Image
+import tempfile
+import os
+from detector import SafetyDetector
+
+st.set_page_config(page_title="Safety Detection System", page_icon="🦺", layout="wide")
+
+@st.cache_resource
+def load_detector():
+    return SafetyDetector("models/best_safety_model.pt")
+
+def main():
+    st.title("🦺 Safety & Surveillance Detection System")
+    st.write("Upload an image to detect helmets, fire, and electrical sparks")
+    
+    # Load detector
+    try:
+        detector = load_detector()
+    except:
+        st.error("Model not found! Please train the model first using model_trainer.py")
+        return
+    
+    # Sidebar
+    st.sidebar.title("Settings")
+    confidence = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.5, 0.1)
+    
+    # File upload
+    uploaded_file = st.file_uploader("Choose an image", type=['jpg', 'jpeg', 'png'])
+    
+    if uploaded_file is not None:
+        # Display original image
+        image = Image.open(uploaded_file)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Original Image")
+            st.image(image, use_column_width=True)
+        
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+            image.save(tmp_file.name)
+            
+            # Run detection
+            with st.spinner("Detecting safety objects..."):
+                result_img = detector.detect_image(tmp_file.name, conf_threshold=confidence)
+            
+            # Display result
+            with col2:
+                st.subheader("Detection Results")
+                st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), use_column_width=True)
+            
+            # Clean up
+            os.unlink(tmp_file.name)
+    
+    # Instructions
+    st.markdown("""
+    ## How to use:
+    1. **Train the model**: Run `python src/model_trainer.py` first
+    2. **Upload an image**: Use the file uploader above
+    3. **Adjust confidence**: Use the slider in the sidebar
+    4. **View results**: Detection boxes will appear on the right
+    
+    ## Detection Classes:
+    - 🦺 **Helmet** (Green boxes): Safety helmets on construction workers
+    - 🔥 **Fire** (Red boxes): Fire or flames in electrical equipment  
+    - ⚡ **Spark** (Yellow boxes): Electrical sparks or arcing
+    """)
+
+if __name__ == "__main__":
+    main()
