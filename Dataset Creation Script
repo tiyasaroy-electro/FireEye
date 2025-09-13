@@ -1,0 +1,195 @@
+import os
+import requests
+import cv2
+import numpy as np
+from PIL import Image
+import json
+from pathlib import Path
+
+class SafetyDatasetCreator:
+    def __init__(self, base_dir="data"):
+        self.base_dir = Path(base_dir)
+        self.categories = ["helmet", "fire", "spark"]
+        
+        # Create directories
+        for category in self.categories:
+            (self.base_dir / category / "images").mkdir(parents=True, exist_ok=True)
+            (self.base_dir / category / "labels").mkdir(parents=True, exist_ok=True)
+    
+    def create_synthetic_helmet_data(self, num_images=200):
+        """Create synthetic helmet detection data"""
+        print("Creating synthetic helmet detection data...")
+        
+        for i in range(num_images):
+            # Create base image (construction site-like)
+            img = np.random.randint(50, 200, (480, 640, 3), dtype=np.uint8)
+            
+            # Add helmet-like shapes
+            num_helmets = np.random.randint(1, 4)
+            labels = []
+            
+            for j in range(num_helmets):
+                # Random helmet position
+                x = np.random.randint(50, 590)
+                y = np.random.randint(50, 430)
+                w, h = np.random.randint(40, 80), np.random.randint(30, 60)
+                
+                # Draw helmet-like shape
+                color = [255, 255, 0] if np.random.random() > 0.3 else [255, 255, 255]  # Yellow or white helmets
+                cv2.ellipse(img, (x, y), (w//2, h//2), 0, 0, 180, color, -1)
+                
+                # YOLO format: class_id center_x center_y width height (normalized)
+                center_x = x / 640
+                center_y = y / 480
+                norm_w = w / 640
+                norm_h = h / 480
+                
+                labels.append(f"0 {center_x:.6f} {center_y:.6f} {norm_w:.6f} {norm_h:.6f}")
+            
+            # Save image and label
+            img_path = self.base_dir / "helmet" / "images" / f"helmet_{i:04d}.jpg"
+            label_path = self.base_dir / "helmet" / "labels" / f"helmet_{i:04d}.txt"
+            
+            cv2.imwrite(str(img_path), img)
+            
+            with open(label_path, 'w') as f:
+                f.write('\n'.join(labels))
+        
+        print(f"Created {num_images} synthetic helmet images")
+    
+    def create_synthetic_fire_data(self, num_images=200):
+        """Create synthetic fire detection data"""
+        print("Creating synthetic fire detection data...")
+        
+        for i in range(num_images):
+            # Create dark base image
+            img = np.random.randint(10, 80, (480, 640, 3), dtype=np.uint8)
+            
+            # Add fire-like regions
+            num_fires = np.random.randint(1, 3)
+            labels = []
+            
+            for j in range(num_fires):
+                # Random fire position
+                x = np.random.randint(50, 590)
+                y = np.random.randint(50, 430)
+                w, h = np.random.randint(60, 120), np.random.randint(80, 150)
+                
+                # Create fire-like gradient
+                for dy in range(h):
+                    for dx in range(w):
+                        if dx + x < 640 and dy + y < 480:
+                            distance = np.sqrt(dx**2 + (dy - h*0.7)**2)
+                            if distance < w/2:
+                                intensity = max(0, 1 - distance/(w/2))
+                                img[y+dy, x+dx] = [
+                                    min(255, int(intensity * 255)),      # Red
+                                    min(255, int(intensity * 200)),      # Green
+                                    min(50, int(intensity * 100))        # Blue
+                                ]
+                
+                # YOLO format
+                center_x = (x + w/2) / 640
+                center_y = (y + h/2) / 480
+                norm_w = w / 640
+                norm_h = h / 480
+                
+                labels.append(f"1 {center_x:.6f} {center_y:.6f} {norm_w:.6f} {norm_h:.6f}")
+            
+            # Save image and label
+            img_path = self.base_dir / "fire" / "images" / f"fire_{i:04d}.jpg"
+            label_path = self.base_dir / "fire" / "labels" / f"fire_{i:04d}.txt"
+            
+            cv2.imwrite(str(img_path), img)
+            
+            with open(label_path, 'w') as f:
+                f.write('\n'.join(labels))
+        
+        print(f"Created {num_images} synthetic fire images")
+    
+    def create_synthetic_spark_data(self, num_images=200):
+        """Create synthetic spark detection data"""
+        print("Creating synthetic spark detection data...")
+        
+        for i in range(num_images):
+            # Create dark industrial-like base
+            img = np.random.randint(20, 100, (480, 640, 3), dtype=np.uint8)
+            
+            # Add spark-like points
+            num_sparks = np.random.randint(5, 20)
+            labels = []
+            
+            spark_regions = []
+            for j in range(np.random.randint(1, 3)):  # 1-2 spark regions
+                center_x = np.random.randint(100, 540)
+                center_y = np.random.randint(100, 380)
+                region_size = np.random.randint(80, 150)
+                
+                spark_count = 0
+                for k in range(num_sparks):
+                    # Random position around center
+                    angle = np.random.random() * 2 * np.pi
+                    distance = np.random.random() * region_size
+                    
+                    x = int(center_x + distance * np.cos(angle))
+                    y = int(center_y + distance * np.sin(angle))
+                    
+                    if 0 < x < 640 and 0 < y < 480:
+                        # Draw bright spark point
+                        spark_size = np.random.randint(2, 6)
+                        cv2.circle(img, (x, y), spark_size, (255, 255, 255), -1)
+                        cv2.circle(img, (x, y), spark_size+2, (100, 200, 255), 2)
+                        spark_count += 1
+                
+                if spark_count > 5:  # Only label regions with enough sparks
+                    # YOLO format for the spark region
+                    norm_x = center_x / 640
+                    norm_y = center_y / 480
+                    norm_w = region_size / 640
+                    norm_h = region_size / 480
+                    
+                    labels.append(f"2 {norm_x:.6f} {norm_y:.6f} {norm_w:.6f} {norm_h:.6f}")
+            
+            # Save image and label
+            img_path = self.base_dir / "spark" / "images" / f"spark_{i:04d}.jpg"
+            label_path = self.base_dir / "spark" / "labels" / f"spark_{i:04d}.txt"
+            
+            cv2.imwrite(str(img_path), img)
+            
+            if labels:
+                with open(label_path, 'w') as f:
+                    f.write('\n'.join(labels))
+            else:
+                # Create empty label file
+                open(label_path, 'w').close()
+        
+        print(f"Created {num_images} synthetic spark images")
+    
+    def create_dataset_yaml(self):
+        """Create YOLO dataset configuration"""
+        yaml_content = f"""
+# Safety Detection Dataset
+path: {self.base_dir.absolute()}
+train: images
+val: images
+
+# Classes
+nc: 3
+names: ['helmet', 'fire', 'spark']
+"""
+        with open(self.base_dir / "dataset.yaml", 'w') as f:
+            f.write(yaml_content.strip())
+        
+        print("Created dataset.yaml configuration")
+    
+    def create_all_datasets(self):
+        """Create all synthetic datasets"""
+        self.create_synthetic_helmet_data(200)
+        self.create_synthetic_fire_data(200)
+        self.create_synthetic_spark_data(200)
+        self.create_dataset_yaml()
+        print("All datasets created successfully!")
+
+if __name__ == "__main__":
+    creator = SafetyDatasetCreator()
+    creator.create_all_datasets()
