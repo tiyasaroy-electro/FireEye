@@ -1,0 +1,113 @@
+import os
+import shutil
+import random
+from pathlib import Path
+import cv2
+import numpy as np
+
+class DataPreprocessor:
+    def __init__(self, data_dir="data", output_dir="processed_data"):
+        self.data_dir = Path(data_dir)
+        self.output_dir = Path(output_dir)
+        
+    def combine_and_split_data(self, train_ratio=0.8):
+        """Combine all categories and split into train/val"""
+        
+        # Create output directories
+        (self.output_dir / "images" / "train").mkdir(parents=True, exist_ok=True)
+        (self.output_dir / "images" / "val").mkdir(parents=True, exist_ok=True)
+        (self.output_dir / "labels" / "train").mkdir(parents=True, exist_ok=True)
+        (self.output_dir / "labels" / "val").mkdir(parents=True, exist_ok=True)
+        
+        all_files = []
+        
+        # Collect all image files
+        for category in ["helmet", "fire", "spark"]:
+            img_dir = self.data_dir / category / "images"
+            label_dir = self.data_dir / category / "labels"
+            
+            for img_file in img_dir.glob("*.jpg"):
+                label_file = label_dir / f"{img_file.stem}.txt"
+                if label_file.exists():
+                    all_files.append((img_file, label_file))
+        
+        # Shuffle and split
+        random.shuffle(all_files)
+        split_idx = int(len(all_files) * train_ratio)
+        
+        train_files = all_files[:split_idx]
+        val_files = all_files[split_idx:]
+        
+        # Copy files
+        for i, (img_file, label_file) in enumerate(train_files):
+            new_img_name = f"train_{i:04d}.jpg"
+            new_label_name = f"train_{i:04d}.txt"
+            
+            shutil.copy2(img_file, self.output_dir / "images" / "train" / new_img_name)
+            shutil.copy2(label_file, self.output_dir / "labels" / "train" / new_label_name)
+        
+        for i, (img_file, label_file) in enumerate(val_files):
+            new_img_name = f"val_{i:04d}.jpg"
+            new_label_name = f"val_{i:04d}.txt"
+            
+            shutil.copy2(img_file, self.output_dir / "images" / "val" / new_img_name)
+            shutil.copy2(label_file, self.output_dir / "labels" / "val" / new_label_name)
+        
+        print(f"Split data: {len(train_files)} train, {len(val_files)} validation")
+        
+        # Create updated dataset.yaml
+        yaml_content = f"""
+path: {self.output_dir.absolute()}
+train: images/train
+val: images/val
+
+nc: 3
+names: ['helmet', 'fire', 'spark']
+"""
+        with open(self.output_dir / "dataset.yaml", 'w') as f:
+            f.write(yaml_content.strip())
+    
+    def augment_data(self):
+        """Apply data augmentation to training images"""
+        train_img_dir = self.output_dir / "images" / "train"
+        train_label_dir = self.output_dir / "labels" / "train"
+        
+        original_files = list(train_img_dir.glob("*.jpg"))
+        
+        for img_file in original_files[:50]:  # Augment first 50 images
+            img = cv2.imread(str(img_file))
+            label_file = train_label_dir / f"{img_file.stem}.txt"
+            
+            if not label_file.exists():
+                continue
+                
+            with open(label_file, 'r') as f:
+                labels = f.read().strip().split('\n')
+            
+            # Horizontal flip
+            flipped_img = cv2.flip(img, 1)
+            flipped_labels = []
+            
+            for label in labels:
+                if label.strip():
+                    parts = label.split()
+                    class_id, center_x, center_y, width, height = parts
+                    # Flip x coordinate
+                    new_center_x = 1.0 - float(center_x)
+                    flipped_labels.append(f"{class_id} {new_center_x:.6f} {center_y} {width} {height}")
+            
+            # Save augmented image and labels
+            aug_img_name = f"{img_file.stem}_flip.jpg"
+            aug_label_name = f"{img_file.stem}_flip.txt"
+            
+            cv2.imwrite(str(train_img_dir / aug_img_name), flipped_img)
+            
+            with open(train_label_dir / aug_label_name, 'w') as f:
+                f.write('\n'.join(flipped_labels))
+        
+        print("Data augmentation completed")
+
+if __name__ == "__main__":
+    preprocessor = DataPreprocessor()
+    preprocessor.combine_and_split_data()
+    preprocessor.augment_data()
